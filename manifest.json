@@ -1,5 +1,5 @@
 {
-  "name": "Entertainment Library",
+  "name": "MovieLib",
   "short_name": "Library",
   "description": "Minimal personal entertainment library for organizing movies, TV shows, and anime locally.",
   "start_url": "./index.html",
