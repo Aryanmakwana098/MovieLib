@@ -142,7 +142,7 @@
                     </div>
                 </section>
 
-                <!-- VIEW: Status List (Reusable for Watching, Completed, etc.) -->
+                <!-- VIEW: Status List -->
                 <section id="view-status" class="view">
                     <header class="view-header flex-between">
                         <h1 id="status-title">Collection</h1>
@@ -232,6 +232,15 @@
                             <div class="media-cast-container" id="media-cast-section">
                                 <h3>Cast</h3>
                                 <div class="horizontal-scroll" id="media-detail-cast"></div>
+                            </div>
+
+                            <!-- NEW: TV Seasons and Episodes -->
+                            <div id="media-tv-seasons-container" class="media-episodes-container hidden">
+                                <div class="section-header flex-between" style="margin-bottom: 1rem;">
+                                    <h3>Episodes</h3>
+                                    <select id="tv-season-select" class="input-minimal" style="width: auto; max-width: 250px;"></select>
+                                </div>
+                                <div id="tv-episodes-list" class="episodes-list"></div>
                             </div>
 
                             <div class="media-meta-grid">
