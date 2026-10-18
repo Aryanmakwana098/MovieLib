@@ -24,7 +24,10 @@ const App = {
         this.initEventListeners();
         this.renderSidebarLibraries();
         this.navigate(window.location.hash || '#home');
+        
         this.checkReminders();
+        // Check for new reminders every 30 seconds while the app is open
+        setInterval(() => this.checkReminders(), 30000);
     },
 
     // --- IndexedDB Wrapper ---
@@ -534,6 +537,7 @@ const App = {
         document.getElementById('media-detail-genres').innerHTML = '';
         document.getElementById('media-detail-cast').innerHTML = '';
         document.getElementById('media-user-data').classList.add('hidden');
+        document.getElementById('media-tv-seasons-container').classList.add('hidden');
 
         let data = null;
         try {
@@ -594,6 +598,38 @@ const App = {
             });
         }
 
+        // Handle TV Seasons and Episodes Rendering
+        const seasonsContainer = document.getElementById('media-tv-seasons-container');
+        const seasonSelect = document.getElementById('tv-season-select');
+        const episodesList = document.getElementById('tv-episodes-list');
+        
+        if (type === 'tv' && data.seasons && data.seasons.length > 0) {
+            seasonsContainer.classList.remove('hidden');
+            seasonSelect.innerHTML = '';
+            
+            // Exclude season 0 (Specials) usually, unless it's the only season
+            const validSeasons = data.seasons.filter(s => s.season_number > 0 || data.seasons.length === 1);
+            
+            validSeasons.forEach(season => {
+                const opt = document.createElement('option');
+                opt.value = season.season_number;
+                opt.textContent = `${season.name} (${season.episode_count} Episodes)`;
+                seasonSelect.appendChild(opt);
+            });
+            
+            if (validSeasons.length > 0) {
+                this.fetchAndRenderSeasonEpisodes(tmdbId, validSeasons[0].season_number);
+            }
+            
+            seasonSelect.onchange = (e) => {
+                this.fetchAndRenderSeasonEpisodes(tmdbId, e.target.value);
+            };
+        } else {
+            seasonsContainer.classList.add('hidden');
+            seasonSelect.innerHTML = '';
+            episodesList.innerHTML = '';
+        }
+
         // Check if in local collection
         const localId = `${type}_${tmdbId}`;
         const localMedia = this.state.media.find(m => m.id === localId);
@@ -606,6 +642,45 @@ const App = {
         } else {
             btnStatus.textContent = 'Add to Collection';
             btnStatus.classList.replace('btn-outline', 'btn-primary');
+        }
+    },
+
+    async fetchAndRenderSeasonEpisodes(tmdbId, seasonNumber) {
+        const episodesList = document.getElementById('tv-episodes-list');
+        episodesList.innerHTML = '<div class="text-subtle text-center" style="padding: 1rem;">Loading episodes...</div>';
+        
+        try {
+            const res = await fetch(`${this.tmdbBaseUrl}/tv/${tmdbId}/season/${seasonNumber}?api_key=${this.tmdbKey}`);
+            const data = await res.json();
+            
+            episodesList.innerHTML = '';
+            
+            if (!data.episodes || data.episodes.length === 0) {
+                episodesList.innerHTML = '<div class="text-subtle">No episodes found for this season.</div>';
+                return;
+            }
+            
+            data.episodes.forEach(ep => {
+                const img = ep.still_path ? `${this.imgBaseUrl}${ep.still_path}` : 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" background="%23333"></svg>';
+                const runtime = ep.runtime ? `${ep.runtime} min` : '';
+                const date = ep.air_date || 'Unknown Date';
+                
+                episodesList.insertAdjacentHTML('beforeend', `
+                    <div class="episode-item">
+                        <img src="${img}" alt="${this.escapeHtml(ep.name)}" class="episode-img" loading="lazy">
+                        <div class="episode-info">
+                            <div class="episode-title">
+                                <span>${ep.episode_number}. ${this.escapeHtml(ep.name)}</span>
+                                <span style="font-size:0.8rem; font-weight:normal; color:var(--text-muted);">${runtime}</span>
+                            </div>
+                            <div class="episode-meta">${date}</div>
+                            <div class="episode-desc">${this.escapeHtml(ep.overview || 'No synopsis available for this episode.')}</div>
+                        </div>
+                    </div>
+                `);
+            });
+        } catch (err) {
+            episodesList.innerHTML = '<div class="text-danger">Failed to load episodes.</div>';
         }
     },
 
@@ -898,8 +973,33 @@ const App = {
         if(this.currentView === 'view-home') this.renderHome();
     },
 
+    playNotificationSound() {
+        try {
+            // Generates a gentle double-chime using the browser's built-in synthesizer
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            if (!AudioContext) return;
+            const ctx = new AudioContext();
+            
+            const playTone = (freq, startTime) => {
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(freq, startTime);
+                gain.gain.setValueAtTime(0, startTime);
+                gain.gain.linearRampToValueAtTime(0.3, startTime + 0.05);
+                gain.gain.exponentialRampToValueAtTime(0.01, startTime + 0.5);
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.start(startTime);
+                osc.stop(startTime + 0.5);
+            };
+
+            playTone(523.25, ctx.currentTime);       // First note
+            playTone(659.25, ctx.currentTime + 0.15); // Second note
+        } catch(e) { console.error("Audio failed", e); }
+    },
+
     checkReminders() {
-        // Simple checking mechanism: if Reminder is today and time passed, request browser notification
         if ("Notification" in window && Notification.permission !== "denied") {
             Notification.requestPermission();
         }
@@ -908,12 +1008,24 @@ const App = {
         this.state.reminders.forEach(rem => {
             if (rem.notified) return;
             const targetTime = new Date(`${rem.date}T${rem.time || '12:00'}`);
-            if (now >= targetTime && now.getTime() - targetTime.getTime() < 86400000) { // Within 24 hours
+            
+            // If the current time just passed the target time (within 24 hours)
+            if (now >= targetTime && now.getTime() - targetTime.getTime() < 86400000) { 
+                
+                // 1. Play the built-in chime sound
+                this.playNotificationSound();
+                
+                // 2. Show the in-app screen notification
+                this.showToast(`🔔 Reminder: ${rem.title}`);
+                
+                // 3. Show OS desktop notification (if allowed)
                 if ("Notification" in window && Notification.permission === "granted") {
-                    new Notification("Library Reminder", { body: rem.title, icon: '/icon.png' });
-                    rem.notified = true;
-                    this.idbPut('reminders', rem);
+                    new Notification("Library Reminder", { body: rem.title });
                 }
+                
+                // Mark as notified and save so it doesn't trigger again
+                rem.notified = true;
+                this.idbPut('reminders', rem);
             }
         });
     },
